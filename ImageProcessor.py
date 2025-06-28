@@ -1,3 +1,6 @@
+import torch
+
+
 class ImageProcessor:
     def preprocess(self, image_batch_uint8):
         # image_batch_uint8 shape: (batch_size, rows, cols, 3) uint8 [cite: 15]

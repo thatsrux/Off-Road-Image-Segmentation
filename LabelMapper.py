@@ -1,8 +1,8 @@
 class LabelMapper:
-    def init(self):
+    def __init__(self):
         self.color_to_class_id = {
             (255, 255, 255): 0,   # Background
-            (1, 8, 255): 1,       # Sky
+            (1, 88, 255): 1,       # Sky
             (156, 76, 30): 2,     # Rough Trail
             (178, 176, 153): 3,   # Smooth Trail
             (128, 255, 0): 4,     # Traversable grass
