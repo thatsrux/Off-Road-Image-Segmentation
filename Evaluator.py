@@ -2,6 +2,10 @@ import numpy as np
 import torch
 
 from ImageProcessor import ImageProcessor
+from LabelMapper import LabelMapper
+import matplotlib.pyplot as plt
+from PIL import Image
+import numpy as np
 
 
 class Evaluator:
@@ -71,10 +75,80 @@ class Evaluator:
         overall_mean_iou = np.mean(mean_iou_per_class)
         return overall_mean_iou, mean_iou_per_class
 
-    @staticmethod
-    def build_prediction_image(predictions_batch):
 
-        if torch.is_tensor(predictions_batch):
-            predictions_batch = predictions_batch.cpu().numpy()
-        # Impila le immagini verticalmente
-        return np.vstack(predictions_batch)
+    def evaluate_classification_metrics(self, num_classes=9):
+        from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+
+        self.model.eval()
+        all_preds = []
+        all_gts = []
+        with torch.no_grad():
+            for images, masks in self.test_loader:
+                images = images.to(self.device)
+                masks = masks.to(self.device)
+                outputs = self.model(images)
+                preds = torch.argmax(outputs, dim=1)
+                all_preds.append(preds.cpu().numpy().flatten())
+                all_gts.append(masks.cpu().numpy().flatten())
+
+        y_pred = np.concatenate(all_preds)
+        y_true = np.concatenate(all_gts)
+
+        metrics = {
+            'accuracy': accuracy_score(y_true, y_pred),
+            'precision': precision_score(y_true, y_pred, average='macro', zero_division=0),
+            'recall': recall_score(y_true, y_pred, average='macro', zero_division=0),
+            'f1': f1_score(y_true, y_pred, average='macro', zero_division=0)
+        }
+        return metrics
+
+
+    def compare_random_label_and_prediction(self, val_dataset):
+        import random
+        import numpy as np
+        import os
+        import matplotlib.pyplot as plt
+        from LabelMapper import LabelMapper
+
+        self.model.eval()
+        label_mapper = LabelMapper()
+        for images, labels in self.test_loader:
+            idx = random.randint(0, images.shape[0] - 1)
+            image = images[idx:idx + 1].to(self.device)
+            label = labels[idx].cpu().numpy()
+            output = self.model(image)
+            pred = torch.argmax(output, dim=1).squeeze(0).cpu().numpy()
+            break
+
+        if hasattr(val_dataset, 'indices'):
+            original_idx = val_dataset.indices[idx]
+            folder_path = val_dataset.dataset.samples[original_idx][0]
+        else:
+            folder_path = val_dataset.samples[idx][0]
+
+        folder_name = os.path.basename(os.path.dirname(folder_path))
+
+        def mask_to_rgb(mask):
+            h, w = mask.shape
+            rgb = np.zeros((h, w, 3), dtype=np.uint8)
+            for cls in np.unique(mask):
+                rgb[mask == cls] = label_mapper.class_id_to_rgb(cls)
+            return rgb
+
+        label_rgb = mask_to_rgb(label)
+        pred_rgb = mask_to_rgb(pred)
+
+
+        plt.figure(figsize=(10, 5))
+        plt.suptitle(f"Folder origine: {folder_name}")
+
+        plt.subplot(1, 2, 1)
+        plt.title("Label reale")
+        plt.imshow(label_rgb.astype(np.uint8))
+        plt.axis('off')
+
+        plt.subplot(1, 2, 2)
+        plt.title("Predizione")
+        plt.imshow(pred_rgb.astype(np.uint8))
+        plt.axis('off')
+        plt.show()
