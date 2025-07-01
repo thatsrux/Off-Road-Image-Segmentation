@@ -35,6 +35,7 @@ class Trainer:
     def validate_epoch(self):
         self.model.eval()
         total_iou = 0.0
+        total_loss = 0.0
         num_batches = 0
 
         with torch.no_grad():
@@ -42,6 +43,9 @@ class Trainer:
                 images = images.to(self.device, non_blocking=True)
                 labels = labels.to(self.device, non_blocking=True)
                 outputs = self.model(images)
+                loss = self.criterion(outputs, labels)
+                total_loss += loss.item()
+
                 predictions = self.image_processor.postprocess(outputs)
                 batch_ious = []
 
@@ -50,31 +54,34 @@ class Trainer:
                     label_single = labels[idx_in_batch].cpu().numpy().squeeze()
                     iou_scores = self.compute_all_iou(pred_single, label_single, self.num_labels)
 
-                    for class_idx, iou in enumerate(iou_scores, start=1):  # classi da 1 a 8
-                        if not np.isnan(iou):
-                            print(f"Batch {batch_idx + 1}, Immagine {idx_in_batch + 1}, Classe {class_idx}: IoU = {iou:.4f}")
-                        else:
-                            print(f"Batch {batch_idx + 1}, Immagine {idx_in_batch + 1}, Classe {class_idx}: IoU = N/A")
-
                     mean_iou = np.nanmean(iou_scores)
                     batch_ious.append(mean_iou)
 
                 batch_iou = np.nanmean(batch_ious)
                 total_iou += batch_iou
                 num_batches += 1
-                print(f"Batch {batch_idx + 1}/{len(self.val_loader)}, mIoU: {batch_iou:.4f}")
+                print(f"Batch {batch_idx + 1}/{len(self.val_loader)}, mIoU: {batch_iou:.4f}, Loss: {loss.item():.4f}")
 
-        return total_iou / num_batches if num_batches > 0 else 0.0
+        avg_iou = total_iou / num_batches if num_batches > 0 else 0.0
+        avg_loss = total_loss / num_batches if num_batches > 0 else 0.0
+        return avg_iou, avg_loss
 
     def run(self, num_epochs, model_save_path):
         best_val_iou = float('-inf')
         epochs_no_improve = 0
+        train_losses = []
+        val_losses = []
+
         for epoch in range(num_epochs):
             print(f"\nEpoch {epoch + 1}/{num_epochs}")
+
             train_loss = self.train_epoch()
+            train_losses.append(train_loss)
             print(f"Train Loss: {train_loss:.4f}")
-            val_iou = self.validate_epoch()
-            print(f"Validation mIoU: {val_iou:.4f}")
+
+            val_iou, val_loss = self.validate_epoch()
+            val_losses.append(val_loss)
+            print(f"Validation mIoU: {val_iou:.4f}, Validation Loss: {val_loss:.4f}")
 
             if val_iou > best_val_iou:
                 best_val_iou = val_iou
@@ -90,6 +97,7 @@ class Trainer:
                 break
 
         print(f"Modello migliore (mIoU={best_val_iou:.4f}) salvato in {model_save_path}")
+        self.plot_losses(train_losses, val_losses)
 
     @staticmethod
     def compute_class_weights(dataloader, num_classes):
@@ -128,3 +136,15 @@ class Trainer:
             iou = self.compute_iou(mask1, mask2, label + 1)
             iou_scores[label] = iou
         return iou_scores
+
+    def plot_losses(self, train_losses, val_losses):
+        import matplotlib.pyplot as plt
+        plt.figure(figsize=(8, 5))
+        plt.plot(train_losses, label='Training Loss')
+        plt.plot(val_losses, label='Validation Loss')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.title('Training vs Validation Loss')
+        plt.legend()
+        plt.grid(True)
+        plt.show()
