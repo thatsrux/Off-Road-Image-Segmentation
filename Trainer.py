@@ -45,15 +45,9 @@ class Trainer:
                 for i in range(predictions.shape[0]):
                     pred_single = predictions[i].cpu().numpy().squeeze()
                     label_single = labels[i].cpu().numpy().squeeze()
-                    iou_scores = np.zeros(num_labels)
-                    for label in range(num_labels):
-                        intersection = np.sum((pred_single == (label + 1)) & (label_single == (label + 1)))
-                        union = np.sum((pred_single == (label + 1)) | (label_single == (label + 1)))
-                        if union == 0:
-                            iou = np.nan
-                        else:
-                            iou = intersection / union
-                        iou_scores[label] = iou
+                    iou_scores = self.compute_all_iou(pred_single, label_single, num_labels)
+                    for class_idx, iou in enumerate(iou_scores, start=1):
+                        print(f"Batch {batch_idx + 1}, Immagine {i + 1}, Classe {class_idx}: IoU = {iou:.4f}")
                     mean_iou = np.nanmean(iou_scores)
                     batch_ious.append(mean_iou)
 
@@ -85,3 +79,18 @@ class Trainer:
                 print(f"Early stopping attivato dopo {epoch + 1} epoche. Miglior mIoU: {best_val_iou:.4f}")
                 break
         print(f"Modello migliore (mIoU={best_val_iou:.4f}) salvato in {model_save_path}")
+
+
+    def compute_iou(self, mask1, mask2, label):
+        intersection = np.sum((mask1 == label) & (mask2 == label))
+        union = np.sum((mask1 == label) | (mask2 == label))
+        if union == 0:
+            return np.nan
+        return intersection / union
+
+    def compute_all_iou(self, mask1, mask2, num_labels=8):
+        iou_scores = np.zeros((num_labels))
+        for label in range(num_labels):
+            iou = self.compute_iou(mask1, mask2, label + 1)
+            iou_scores[label] = iou
+        return iou_scores
