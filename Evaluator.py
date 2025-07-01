@@ -119,6 +119,20 @@ class Evaluator:
         plt.axis('off')
         plt.show()
 
+    def compute_iou(self, mask1, mask2, label):
+        intersection = np.sum((mask1 == label) & (mask2 == label))
+        union = np.sum((mask1 == label) | (mask2 == label))
+        if union == 0:
+            return np.nan
+        return intersection / union
+
+    def compute_all_iou(self, mask1, mask2, num_labels=8):
+        iou_scores = np.zeros((num_labels))
+        for label in range(num_labels):
+            iou = self.compute_iou(mask1, mask2, label + 1)
+            iou_scores[label] = iou
+        return iou_scores
+
     def predict_from_folder(self, folder_number, data_root='train'):
         import os
         import matplotlib.pyplot as plt
@@ -151,12 +165,14 @@ class Evaluator:
         with torch.no_grad():
             output = self.model(image_tensor)
             pred_mask = torch.argmax(output, dim=1).squeeze(0).cpu().numpy()
+
         def id_to_rgb_mask(id_mask, id_to_color_map):
             h, w = id_mask.shape
             rgb_mask = np.zeros((h, w, 3), dtype=np.uint8)
             for class_id, color_rgb in id_to_color_map.items():
                 rgb_mask[id_mask == class_id] = color_rgb
             return rgb_mask
+
         id_to_color = label_mapper.class_id_to_color
         true_label_rgb = id_to_rgb_mask(class_id_mask, id_to_color)
         pred_label_rgb = id_to_rgb_mask(pred_mask, id_to_color)
@@ -178,3 +194,7 @@ class Evaluator:
         correct = (pred_mask == class_id_mask).sum()
         total = class_id_mask.size
         print(f"Pixel classificati correttamente: {correct} / {total} ({correct / total:.2%})")
+        iou_scores = self.compute_all_iou(pred_mask, class_id_mask, num_labels=8)
+        mean_iou = np.nanmean(iou_scores)
+        print(f"IoU medio sull'immagine: {mean_iou:.4f}")
+        print(f"IoU per classe: {iou_scores}")
