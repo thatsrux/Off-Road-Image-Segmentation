@@ -1,3 +1,5 @@
+import numpy as np
+
 class LabelMapper:
     def __init__(self):
         self.color_to_class_id = {

@@ -1,9 +1,10 @@
-from Evaluator import Evaluator
-from ImageProcessor import ImageProcessor
 import torch
+import numpy as np
+from ImageProcessor import ImageProcessor
+
 
 class Trainer:
-    def __init__(self, model, train_loader, val_loader, criterion, optimizer, device):
+    def __init__(self, model, train_loader, val_loader, criterion, optimizer, device, early_stopping_patience=10):
         self.model = model
         self.train_loader = train_loader
         self.val_loader = val_loader
@@ -11,6 +12,7 @@ class Trainer:
         self.optimizer = optimizer
         self.device = device
         self.image_processor = ImageProcessor()
+        self.early_stopping_patience = early_stopping_patience
 
     def train_epoch(self):
         self.model.train()
@@ -31,34 +33,40 @@ class Trainer:
         self.model.eval()
         total_iou = 0.0
         num_batches = 0
+        num_labels = 8
         with torch.no_grad():
             for batch_idx, (images, labels) in enumerate(self.val_loader):
                 images = images.to(self.device, non_blocking=True)
                 labels = labels.to(self.device, non_blocking=True)
                 outputs = self.model(images)
                 predictions = self.image_processor.postprocess(outputs)
-                labels_device = labels
+                batch_ious = []
 
-                current_batch_iou_sum = 0.0
                 for i in range(predictions.shape[0]):
-                    pred_single = predictions[i].squeeze(-1)
-                    label_single = labels_device[i]
-                    iou_per_class = Evaluator.calculate_iou_metric_single(
-                        pred_single, label_single, num_classes=9
-                    )
-                    iou_per_class_tensor = torch.tensor(iou_per_class, device=self.device)
-                    current_batch_iou_sum += torch.mean(iou_per_class_tensor.float()).item()
+                    pred_single = predictions[i].cpu().numpy().squeeze()
+                    label_single = labels[i].cpu().numpy().squeeze()
+                    iou_scores = np.zeros(num_labels)
+                    for label in range(num_labels):
+                        intersection = np.sum((pred_single == (label + 1)) & (label_single == (label + 1)))
+                        union = np.sum((pred_single == (label + 1)) | (label_single == (label + 1)))
+                        if union == 0:
+                            iou = np.nan
+                        else:
+                            iou = intersection / union
+                        iou_scores[label] = iou
+                    mean_iou = np.nanmean(iou_scores)
+                    batch_ious.append(mean_iou)
 
-                batch_iou = current_batch_iou_sum
+                batch_iou = np.nanmean(batch_ious)
                 total_iou += batch_iou
                 num_batches += 1
                 print(f"Batch {batch_idx + 1}/{len(self.val_loader)}, mIoU: {batch_iou:.4f}")
 
         return total_iou / num_batches if num_batches > 0 else 0.0
 
-
     def run(self, num_epochs, model_save_path):
         best_val_iou = float('-inf')
+        epochs_no_improve = 0
         for epoch in range(num_epochs):
             print(f"\nEpoch {epoch + 1}/{num_epochs}")
             train_loss = self.train_epoch()
@@ -69,4 +77,11 @@ class Trainer:
                 best_val_iou = val_iou
                 torch.save(self.model.state_dict(), model_save_path)
                 print(f"Nuovo modello migliore salvato in {model_save_path}")
+                epochs_no_improve = 0
+            else:
+                epochs_no_improve += 1
+                print(f"Nessun miglioramento per {epochs_no_improve} epoche.")
+            if epochs_no_improve >= self.early_stopping_patience:
+                print(f"Early stopping attivato dopo {epoch + 1} epoche. Miglior mIoU: {best_val_iou:.4f}")
+                break
         print(f"Modello migliore (mIoU={best_val_iou:.4f}) salvato in {model_save_path}")

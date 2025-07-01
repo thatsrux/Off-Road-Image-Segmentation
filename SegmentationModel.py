@@ -1,48 +1,59 @@
-from SegmentationModel_parts import *
-import torch # Import added for clarity if not already present globally
+import torch
+import torch.nn as nn
+import torchvision.transforms.functional as TF
+
 
 class SegmentationModel(nn.Module):
-    def __init__(self, n_channels, n_classes, bilinear=False):
-        super(SegmentationModel, self).__init__()
-        self.n_channels = n_channels
-        self.n_classes = n_classes
-        self.bilinear = bilinear
 
-        # Canali ridotti per una rete più leggera
-        self.inc = (DoubleConv(n_channels, 32))      # Da 64 a 32
-        self.down1 = (Down(32, 64))                  # Da 128 a 64
-        self.down2 = (Down(64, 128))                 # Da 256 a 128
-        self.down3 = (Down(128, 256))                # Da 512 a 256
-        factor = 2 if bilinear else 1
-        self.down4 = (Down(256, 512 // factor))      # Da 1024 a 512 (o 256 se bilinear)
-        self.up1 = (Up(512, 256 // factor, bilinear)) # Da 1024 a 512 in ingresso, output 256 (o 128 se bilinear)
-        self.up2 = (Up(256, 128 // factor, bilinear)) # Da 512 a 256 in ingresso, output 128 (o 64 se bilinear)
-        self.up3 = (Up(128, 64 // factor, bilinear))  # Da 256 a 128 in ingresso, output 64 (o 32 se bilinear)
-        self.up4 = (Up(64, 32, bilinear))            # Da 128 a 64 in ingresso, output 32
-        self.outc = (OutConv(32, n_classes))         # Output layer
+    def __init__(self, in_channels=3, classes=9):
+        super(SegmentationModel, self).__init__()
+        self.layers = [in_channels, 64, 128, 256, 512, 1024]
+
+        self.double_conv_downs = nn.ModuleList(
+            [self.__double_conv(layer, layer_n) for layer, layer_n in zip(self.layers[:-1], self.layers[1:])])
+
+        self.up_trans = nn.ModuleList(
+            [nn.ConvTranspose2d(layer, layer_n, kernel_size=2, stride=2)
+             for layer, layer_n in zip(self.layers[::-1][:-2], self.layers[::-1][1:-1])])
+
+        self.double_conv_ups = nn.ModuleList(
+            [self.__double_conv(layer, layer // 2) for layer in self.layers[::-1][:-2]])
+
+        self.max_pool_2x2 = nn.MaxPool2d(kernel_size=2, stride=2)
+
+        self.final_conv = nn.Conv2d(64, classes, kernel_size=1)
+
+    def __double_conv(self, in_channels, out_channels):
+        conv = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True)
+        )
+        return conv
 
     def forward(self, x):
-        x1 = self.inc(x)
-        x2 = self.down1(x1)
-        x3 = self.down2(x2)
-        x4 = self.down3(x3)
-        x5 = self.down4(x4)
-        x = self.up1(x5, x4)
-        x = self.up2(x, x3)
-        x = self.up3(x, x2)
-        x = self.up4(x, x1)
-        logits = self.outc(x)
-        return logits
+        # down layers
+        concat_layers = []
 
-    def use_checkpointing(self):
-        # Mantiene il checkpointing per ottimizzazione della memoria
-        self.inc = torch.utils.checkpoint.checkpoint(self.inc)
-        self.down1 = torch.utils.checkpoint.checkpoint(self.down1)
-        self.down2 = torch.utils.checkpoint.checkpoint(self.down2)
-        self.down3 = torch.utils.checkpoint.checkpoint(self.down3)
-        self.down4 = torch.utils.checkpoint.checkpoint(self.down4)
-        self.up1 = torch.utils.checkpoint.checkpoint(self.up1)
-        self.up2 = torch.utils.checkpoint.checkpoint(self.up2)
-        self.up3 = torch.utils.checkpoint.checkpoint(self.up3)
-        self.up4 = torch.utils.checkpoint.checkpoint(self.up4)
-        self.outc = torch.utils.checkpoint.checkpoint(self.outc)
+        for down in self.double_conv_downs:
+            x = down(x)
+            if down != self.double_conv_downs[-1]:
+                concat_layers.append(x)
+                x = self.max_pool_2x2(x)
+
+        concat_layers = concat_layers[::-1]
+
+        # up layers
+        for up_trans, double_conv_up, concat_layer in zip(self.up_trans, self.double_conv_ups, concat_layers):
+            x = up_trans(x)
+            if x.shape != concat_layer.shape:
+                x = TF.resize(x, concat_layer.shape[2:])
+
+            concatenated = torch.cat((concat_layer, x), dim=1)
+            x = double_conv_up(concatenated)
+
+        x = self.final_conv(x)
+
+        return x
