@@ -1,8 +1,8 @@
-from collections import Counter
-
 import torch
 import numpy as np
+from collections import Counter
 from ImageProcessor import ImageProcessor
+import matplotlib.pyplot as plt
 
 
 class Trainer:
@@ -15,7 +15,7 @@ class Trainer:
         self.device = device
         self.image_processor = ImageProcessor()
         self.early_stopping_patience = early_stopping_patience
-        self.num_labels = 9  # Classi da 0 a 8 (0 = background, ignorata nella validazione)
+        self.num_labels = 9  # classi da 0 a 8 (0 = background)
 
     def train_epoch(self):
         self.model.train()
@@ -101,7 +101,6 @@ class Trainer:
 
     @staticmethod
     def compute_class_weights(dataloader, num_classes):
-        from collections import Counter
         label_counts = Counter()
         total_pixels = 0
         for _, masks in dataloader:
@@ -138,7 +137,6 @@ class Trainer:
         return iou_scores
 
     def plot_losses(self, train_losses, val_losses):
-        import matplotlib.pyplot as plt
         plt.figure(figsize=(8, 5))
         plt.plot(train_losses, label='Training Loss')
         plt.plot(val_losses, label='Validation Loss')

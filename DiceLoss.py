@@ -1,51 +1,38 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+
 
 class DiceLoss(nn.Module):
-    def __init__(self, weight=None, smooth=1e-6):
+    def __init__(self, num_classes, ignore_index=0, smooth=1e-6):
         super(DiceLoss, self).__init__()
-        self.weight = weight  # class weights
+        self.num_classes = num_classes
+        self.ignore_index = ignore_index
         self.smooth = smooth
 
     def forward(self, inputs, targets):
-        # inputs: (batch_size, num_classes, H, W) - output from the model
-        # targets: (batch_size, H, W) - ground truth labels
+        """
+        inputs: (N, C, H, W) - logits (non softmaxati)
+        targets: (N, H, W) - valori interi da 0 a C-1
+        """
+        inputs = F.softmax(inputs, dim=1)  # Convert logits to probabilities
 
-        # Apply softmax to get probabilities for each class
-        inputs = torch.softmax(inputs, dim=1)
+        total_dice = 0.0
+        valid_classes = 0
 
-        # Convert targets to one-hot encoding
-        targets_one_hot = torch.zeros_like(inputs).scatter_(1, targets.unsqueeze(1), 1)
+        for class_idx in range(self.num_classes):
+            if class_idx == self.ignore_index:
+                continue
 
-        # Flatten label and prediction tensors for easier calculation
-        inputs = inputs.view(inputs.size(0), inputs.size(1), -1) # (batch_size, num_classes, H*W)
-        targets_one_hot = targets_one_hot.view(targets_one_hot.size(0), targets_one_hot.size(1), -1) # (batch_size, num_classes, H*W)
+            # Create binary masks for the current class
+            inputs_class = inputs[:, class_idx, :, :]  # (N, H, W)
+            targets_class = (targets == class_idx).float()  # (N, H, W)
 
-        # Calculate Intersection and Union for each class
-        intersection = (inputs * targets_one_hot).sum(dim=2)  # (batch_size, num_classes)
-        total = (inputs + targets_one_hot).sum(dim=2)         # (batch_size, num_classes)
+            intersection = torch.sum(inputs_class * targets_class)
+            union = torch.sum(inputs_class) + torch.sum(targets_class)
 
-        # Calculate Dice score for each class
-        dice = (2. * intersection + self.smooth) / (total + self.smooth) # (batch_size, num_classes)
+            dice_score = (2.0 * intersection + self.smooth) / (union + self.smooth)
+            total_dice += 1.0 - dice_score  # Dice loss
+            valid_classes += 1
 
-        # Dice loss is 1 - Dice score
-        loss = 1 - dice
-
-        # Apply weights if provided
-        if self.weight is not None:
-            # Ensure weights are on the same device and match the number of classes
-            if self.weight.device != loss.device:
-                self.weight = self.weight.to(loss.device)
-            if self.weight.size(0) != loss.size(1):
-                 raise ValueError("Weight tensor must have the same number of elements as the number of classes.")
-
-            # Expand weights to match the loss tensor shape for broadcasting
-            weight = self.weight.unsqueeze(0).expand_as(loss) # (1, num_classes) -> (batch_size, num_classes)
-
-            # Apply weights to the loss
-            loss = loss * weight
-
-        # Mean loss across classes, then mean across batch
-        loss = loss.mean(dim=1).mean()
-
-        return loss
+        return total_dice / valid_classes if valid_classes > 0 else torch.tensor(0.0, device=inputs.device)
