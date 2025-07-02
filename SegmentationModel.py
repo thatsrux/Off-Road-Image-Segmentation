@@ -8,7 +8,6 @@ class SegmentationModel(nn.Module):
         # Usa Unet con encoder ResNet34 pre-addestrato su ImageNet
         self.model = smp.Unet(
             encoder_name="resnet34",
-            encoder_weights="imagenet",
             in_channels=3,
             classes=n_class,
         )
