@@ -4,6 +4,7 @@ import torch
 from torch.utils.data import Dataset
 from PIL import Image
 from LabelMapper import LabelMapper
+from tqdm.auto import tqdm
 
 class RuralDataset(Dataset):
     def __init__(self, root_dir, transform=None):
@@ -13,7 +14,8 @@ class RuralDataset(Dataset):
         self.samples = []
         self.classes_per_sample = []
 
-        for folder_name in os.listdir(root_dir):
+        # Wrap the folder iteration with tqdm
+        for folder_name in tqdm(os.listdir(root_dir), desc=f"Loading data from {root_dir}"):
             folder_path = os.path.join(root_dir, folder_name)
             if os.path.isdir(folder_path):
                 rgb_path = os.path.join(folder_path, 'rgb.jpg')
