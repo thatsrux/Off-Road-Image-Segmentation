@@ -1,59 +1,61 @@
 import torch
 import torch.nn as nn
-import torchvision.transforms.functional as TF
+
+
+def double_conv(in_channels, out_channels):
+    return nn.Sequential(
+        nn.Conv2d(in_channels, out_channels, 3, padding=1),
+        nn.ReLU(inplace=True),
+        nn.Conv2d(out_channels, out_channels, 3, padding=1),
+        nn.ReLU(inplace=True)
+    )
 
 
 class SegmentationModel(nn.Module):
 
-    def __init__(self, in_channels=3, classes=9):
-        super(SegmentationModel, self).__init__()
-        self.layers = [in_channels, 64, 128, 256, 512, 1024]
+    def __init__(self, n_class):
+        super().__init__()
 
-        self.double_conv_downs = nn.ModuleList(
-            [self.__double_conv(layer, layer_n) for layer, layer_n in zip(self.layers[:-1], self.layers[1:])])
+        self.dconv_down1 = double_conv(3, 64)
+        self.dconv_down2 = double_conv(64, 128)
+        self.dconv_down3 = double_conv(128, 256)
+        self.dconv_down4 = double_conv(256, 512)
 
-        self.up_trans = nn.ModuleList(
-            [nn.ConvTranspose2d(layer, layer_n, kernel_size=2, stride=2)
-             for layer, layer_n in zip(self.layers[::-1][:-2], self.layers[::-1][1:-1])])
+        self.maxpool = nn.MaxPool2d(2)
+        self.upsample = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
 
-        self.double_conv_ups = nn.ModuleList(
-            [self.__double_conv(layer, layer // 2) for layer in self.layers[::-1][:-2]])
+        self.dconv_up3 = double_conv(256 + 512, 256)
+        self.dconv_up2 = double_conv(128 + 256, 128)
+        self.dconv_up1 = double_conv(128 + 64, 64)
 
-        self.max_pool_2x2 = nn.MaxPool2d(kernel_size=2, stride=2)
-
-        self.final_conv = nn.Conv2d(64, classes, kernel_size=1)
-
-    def __double_conv(self, in_channels, out_channels):
-        conv = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True)
-        )
-        return conv
+        self.conv_last = nn.Conv2d(64, n_class, 1)
 
     def forward(self, x):
-        # down layers
-        concat_layers = []
+        conv1 = self.dconv_down1(x)
+        x = self.maxpool(conv1)
 
-        for down in self.double_conv_downs:
-            x = down(x)
-            if down != self.double_conv_downs[-1]:
-                concat_layers.append(x)
-                x = self.max_pool_2x2(x)
+        conv2 = self.dconv_down2(x)
+        x = self.maxpool(conv2)
 
-        concat_layers = concat_layers[::-1]
+        conv3 = self.dconv_down3(x)
+        x = self.maxpool(conv3)
 
-        # up layers
-        for up_trans, double_conv_up, concat_layer in zip(self.up_trans, self.double_conv_ups, concat_layers):
-            x = up_trans(x)
-            if x.shape != concat_layer.shape:
-                x = TF.resize(x, concat_layer.shape[2:])
+        x = self.dconv_down4(x)
 
-            concatenated = torch.cat((concat_layer, x), dim=1)
-            x = double_conv_up(concatenated)
+        x = self.upsample(x)
+        x = torch.cat([x, conv3], dim=1)
 
-        x = self.final_conv(x)
+        x = self.dconv_up3(x)
+        x = self.upsample(x)
+        x = torch.cat([x, conv2], dim=1)
 
-        return x
+        x = self.dconv_up2(x)
+        x = self.upsample(x)
+        x = torch.cat([x, conv1], dim=1)
+
+        x = self.dconv_up1(x)
+
+        out = self.conv_last(x)
+        out = torch.softmax(out, dim=1)
+
+        return out
