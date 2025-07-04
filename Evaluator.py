@@ -48,6 +48,8 @@ class Evaluator:
             for images, labels in self.test_loader:
                 images = images.to(self.device)
                 outputs = self.model(images)
+                if isinstance(outputs, dict):
+                    outputs = outputs["out"]
                 predictions = torch.argmax(outputs, dim=1).cpu().numpy()
                 labels = labels.cpu().numpy()
                 for i in range(images.shape[0]):
@@ -67,6 +69,8 @@ class Evaluator:
                 images = images.to(self.device)
                 masks = masks.to(self.device)
                 outputs = self.model(images)
+                if isinstance(outputs, dict):
+                    outputs = outputs["out"]
                 preds = torch.argmax(outputs, dim=1)
                 all_preds.append(preds.cpu().numpy().flatten())
                 all_gts.append(masks.cpu().numpy().flatten())
@@ -91,6 +95,8 @@ class Evaluator:
             image = images[idx:idx + 1].to(self.device)
             label = labels[idx].cpu().numpy()
             output = self.model(image)
+            if isinstance(output, dict):
+                output = output["out"]
             pred = torch.argmax(output, dim=1).squeeze(0).cpu().numpy()
             break
         if hasattr(val_dataset, 'indices'):
@@ -164,6 +170,8 @@ class Evaluator:
         self.model.eval()
         with torch.no_grad():
             output = self.model(image_tensor)
+            if isinstance(output, dict):
+                output = output["out"]
             pred_mask = torch.argmax(output, dim=1).squeeze(0).cpu().numpy()
 
         def id_to_rgb_mask(id_mask, id_to_color_map):
@@ -198,3 +206,94 @@ class Evaluator:
         mean_iou = np.nanmean(iou_scores)
         print(f"IoU medio sull'immagine: {mean_iou:.4f}")
         print(f"IoU per classe: {iou_scores}")
+
+    def predict_from_all_folders(self, data_root='test'):
+        import os
+        import numpy as np
+        from PIL import Image
+        from torchvision import transforms
+        import torch
+        import matplotlib.pyplot as plt
+        label_mapper = LabelMapper()
+        all_iou_scores = []
+        all_accuracies = []
+        folders = [f for f in os.listdir(data_root) if os.path.isdir(os.path.join(data_root, f))]
+        folders.sort()
+        for folder_name in folders:
+            folder_path = os.path.join(data_root, folder_name)
+            rgb_path = os.path.join(folder_path, 'rgb.jpg')
+            label_path = os.path.join(folder_path, 'labels.png')
+            if not (os.path.exists(rgb_path) and os.path.exists(label_path)):
+                print(f"Immagini non trovate in {folder_path}")
+                continue
+            image = Image.open(rgb_path).convert("RGB")
+            label_image = Image.open(label_path).convert("RGB")
+            label_np = np.array(label_image)
+            class_id_mask = np.zeros((label_np.shape[0], label_np.shape[1]), dtype=np.uint8)
+            for r in range(label_np.shape[0]):
+                for c in range(label_np.shape[1]):
+                    pixel_rgb = tuple(label_np[r, c])
+                    class_id_mask[r, c] = label_mapper.rgb_to_class_id(pixel_rgb)
+            class_id_mask = np.array(Image.fromarray(class_id_mask).resize((512, 272), resample=Image.NEAREST))
+            val_transform = transforms.Compose([
+                transforms.Resize((272, 512)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ])
+            image_tensor = val_transform(image).unsqueeze(0).to(self.device)
+            self.model.eval()
+            with torch.no_grad():
+                output = self.model(image_tensor)
+                if isinstance(output, dict):
+                    output = output["out"]
+                pred_mask = torch.argmax(output, dim=1).squeeze(0).cpu().numpy()
+            correct = (pred_mask == class_id_mask).sum()
+            total = class_id_mask.size
+            accuracy = correct / total
+            iou_scores = self.compute_all_iou(pred_mask, class_id_mask, num_labels=8)
+            mean_iou = np.nanmean(iou_scores)
+            all_iou_scores.append(iou_scores)
+            all_accuracies.append(accuracy)
+            print(f"Cartella: {folder_name}")
+            print(f"  Pixel classificati correttamente: {correct} / {total} ({accuracy:.2%})")
+            print(f"  IoU medio sull'immagine: {mean_iou:.4f}")
+            print(f"  IoU per classe: {iou_scores}")
+
+            # --- PLOT ---
+            def id_to_rgb_mask(id_mask, id_to_color_map):
+                h, w = id_mask.shape
+                rgb_mask = np.zeros((h, w, 3), dtype=np.uint8)
+                for class_id, color_rgb in id_to_color_map.items():
+                    rgb_mask[id_mask == class_id] = color_rgb
+                return rgb_mask
+
+            id_to_color = label_mapper.class_id_to_color
+            true_label_rgb = id_to_rgb_mask(class_id_mask, id_to_color)
+            pred_label_rgb = id_to_rgb_mask(pred_mask, id_to_color)
+            plt.figure(figsize=(18, 6))
+            plt.suptitle(f"Risultati cartella: {folder_name}")
+            plt.subplot(1, 3, 1)
+            plt.title('Immagine RGB')
+            plt.imshow(image)
+            plt.axis('off')
+            plt.subplot(1, 3, 2)
+            plt.title('Label reale')
+            plt.imshow(true_label_rgb)
+            plt.axis('off')
+            plt.subplot(1, 3, 3)
+            plt.title('Label predetta')
+            plt.imshow(pred_label_rgb)
+            plt.axis('off')
+            plt.tight_layout()
+            plt.show()
+        if all_iou_scores:
+            all_iou_scores = np.array(all_iou_scores)
+            mean_iou_per_class = np.nanmean(all_iou_scores, axis=0)
+            mean_iou_total = np.nanmean(all_iou_scores)
+            mean_accuracy = np.mean(all_accuracies)
+            print("\n--- Risultati medi su tutte le cartelle ---")
+            print(f"Accuratezza media: {mean_accuracy:.2%}")
+            print(f"IoU medio totale: {mean_iou_total:.4f}")
+            print(f"IoU medio per classe: {mean_iou_per_class}")
+        else:
+            print("Nessuna cartella valida trovata.")
