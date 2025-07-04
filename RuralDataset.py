@@ -23,8 +23,6 @@ class RuralDataset(Dataset):
                     # Aggiungi versione aumentata se richiesto
                     if augment:
                         self.samples.append((rgb_path, labels_path, True))
-                        self.samples.append((rgb_path, labels_path, True))
-                        self.samples.append((rgb_path, labels_path, True))
                 else:
                     print(f"Warning: Missing rgb.jpg or labels.png in {folder_path}")
 

@@ -20,6 +20,8 @@ class Trainer:
     def train_epoch(self):
         self.model.train()
         running_loss = 0.0
+        total_ious = np.zeros(self.num_labels)
+        num_batches = 0
         for batch_idx, (images, labels) in enumerate(self.train_loader):
             images = images.to(self.device)
             labels = labels.to(self.device)
@@ -29,7 +31,19 @@ class Trainer:
             loss.backward()
             self.optimizer.step()
             running_loss += loss.item()
+            # Calcolo IoU per batch
+            predictions = self.image_processor.postprocess(outputs)
+            batch_ious = np.zeros(self.num_labels)
+            for idx_in_batch in range(predictions.shape[0]):
+                pred_single = predictions[idx_in_batch].cpu().numpy().squeeze()
+                label_single = labels[idx_in_batch].cpu().numpy().squeeze()
+                iou_scores = self.compute_all_iou(pred_single, label_single, self.num_labels)
+                batch_ious += np.nan_to_num(iou_scores)
+            total_ious += batch_ious / predictions.shape[0]
+            num_batches += 1
             print(f"Batch {batch_idx + 1}/{len(self.train_loader)}, Loss: {loss.item():.4f}")
+        avg_ious = total_ious / num_batches if num_batches > 0 else np.zeros(self.num_labels)
+        print(f"{[f'{iou:.4f}' for iou in avg_ious]}")
         return running_loss / len(self.train_loader)
 
     def validate_epoch(self):
@@ -37,7 +51,7 @@ class Trainer:
         total_iou = 0.0
         total_loss = 0.0
         num_batches = 0
-
+        total_ious_per_class = np.zeros(self.num_labels)
         with torch.no_grad():
             for batch_idx, (images, labels) in enumerate(self.val_loader):
                 images = images.to(self.device, non_blocking=True)
@@ -48,20 +62,22 @@ class Trainer:
 
                 predictions = self.image_processor.postprocess(outputs)
                 batch_ious = []
-
+                batch_ious_per_class = np.zeros(self.num_labels)
                 for idx_in_batch in range(predictions.shape[0]):
                     pred_single = predictions[idx_in_batch].cpu().numpy().squeeze()
                     label_single = labels[idx_in_batch].cpu().numpy().squeeze()
                     iou_scores = self.compute_all_iou(pred_single, label_single, self.num_labels)
-
-                    mean_iou = np.nanmean(iou_scores)
-                    batch_ious.append(mean_iou)
-
+                    batch_ious.append(np.nanmean(iou_scores))
+                    batch_ious_per_class += np.nan_to_num(iou_scores)
                 batch_iou = np.nanmean(batch_ious)
                 total_iou += batch_iou
+                # Media IoU per classe per batch
+                total_ious_per_class += batch_ious_per_class / predictions.shape[0]
                 num_batches += 1
                 print(f"Batch {batch_idx + 1}/{len(self.val_loader)}, mIoU: {batch_iou:.4f}, Loss: {loss.item():.4f}")
 
+        avg_ious_per_class = total_ious_per_class / num_batches if num_batches > 0 else np.zeros(self.num_labels)
+        print(f"IoU medio per classe (validation): {[f'{iou:.4f}' for iou in avg_ious_per_class]}")
         avg_iou = total_iou / num_batches if num_batches > 0 else 0.0
         avg_loss = total_loss / num_batches if num_batches > 0 else 0.0
         return avg_iou, avg_loss
