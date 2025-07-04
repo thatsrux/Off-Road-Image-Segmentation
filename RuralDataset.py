@@ -3,6 +3,8 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 from PIL import Image
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
 from LabelMapper import LabelMapper
 
 class RuralDataset(Dataset):
@@ -11,6 +13,7 @@ class RuralDataset(Dataset):
         self.transform = transform
         self.label_mapper = LabelMapper()
         self.samples = []
+        self.augment = augment
 
         for folder_name in os.listdir(root_dir):
             folder_path = os.path.join(root_dir, folder_name)
@@ -23,6 +26,8 @@ class RuralDataset(Dataset):
                     # Aggiungi versione aumentata se richiesto
                     if augment:
                         self.samples.append((rgb_path, labels_path, True))
+                        self.samples.append((rgb_path, labels_path, True))
+                        self.samples.append((rgb_path, labels_path, True))
                 else:
                     print(f"Warning: Missing rgb.jpg or labels.png in {folder_path}")
 
@@ -31,33 +36,34 @@ class RuralDataset(Dataset):
 
     def __getitem__(self, idx):
         rgb_path, labels_path, apply_transform = self.samples[idx]
-        image = Image.open(rgb_path).convert("RGB")
-        label_image = Image.open(labels_path).convert("RGB")
-
-        # Resize immagini (solo se Resize è presente nella transform)
-        resize_size = None
-        if self.transform is not None:
-            for t in getattr(self.transform, 'transforms', []):
-                if t.__class__.__name__ == 'Resize':
-                    resize_size = t.size if hasattr(t, 'size') else t.args[0]
-                    break
-        if resize_size:
-            image = image.resize((resize_size[1], resize_size[0]), Image.BILINEAR)
-            label_image = label_image.resize((resize_size[1], resize_size[0]), Image.NEAREST)
+        image = np.array(Image.open(rgb_path).convert("RGB"))
+        label_image = np.array(Image.open(labels_path).convert("RGB"))
 
         # Prepara la mappa delle classi
-        label_np = np.array(label_image)
-        class_id_mask = np.zeros((label_np.shape[0], label_np.shape[1]), dtype=np.uint8)
-        for r in range(label_np.shape[0]):
-            for c in range(label_np.shape[1]):
-                class_id_mask[r, c] = self.label_mapper.rgb_to_class_id(tuple(label_np[r, c]))
+        class_id_mask = np.zeros((label_image.shape[0], label_image.shape[1]), dtype=np.uint8)
+        for r in range(label_image.shape[0]):
+            for c in range(label_image.shape[1]):
+                class_id_mask[r, c] = self.label_mapper.rgb_to_class_id(tuple(label_image[r, c]))
 
-        # Applica trasformazione solo se richiesto
+
+        # Applica trasformazione solo se richiesto e disponibile
         if self.transform and apply_transform:
-            image = self.transform(image)
+            augmented = self.transform(image=image, mask=class_id_mask)
+            image = augmented['image']
+            class_id_mask = augmented['mask']
+        elif self.transform and not apply_transform:
+             # Applica solo le trasformazioni di validazione (Resize, Normalize, ToTensor)
+             val_transform_subset = A.Compose([
+                t for t in self.transform.transforms if isinstance(t, (A.Resize, A.Normalize, ToTensorV2))
+             ], additional_targets={'mask': 'mask'})
+             augmented = val_transform_subset(image=image, mask=class_id_mask)
+             image = augmented['image']
+             class_id_mask = augmented['mask']
         else:
-            image = torch.from_numpy(np.array(image)).permute(2, 0, 1).float() / 255.0
+             # Fallback if no transform is provided (should not happen with the current usage)
+             image = ToTensorV2()(image=image)['image']
+             class_id_mask = torch.from_numpy(class_id_mask).long()
 
-        label_tensor = torch.from_numpy(class_id_mask).long()
+
+        label_tensor = class_id_mask.long()
         return image, label_tensor
-

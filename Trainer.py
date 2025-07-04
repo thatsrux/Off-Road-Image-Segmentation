@@ -27,6 +27,9 @@ class Trainer:
             labels = labels.to(self.device)
             self.optimizer.zero_grad()
             outputs = self.model(images)
+            # Se outputs è un dizionario, prendi la chiave 'out'
+            if isinstance(outputs, dict):
+                outputs = outputs["out"]
             loss = self.criterion(outputs, labels)
             loss.backward()
             self.optimizer.step()
@@ -57,6 +60,9 @@ class Trainer:
                 images = images.to(self.device, non_blocking=True)
                 labels = labels.to(self.device, non_blocking=True)
                 outputs = self.model(images)
+                # Se outputs è un dizionario, prendi la chiave 'out'
+                if isinstance(outputs, dict):
+                    outputs = outputs["out"]
                 loss = self.criterion(outputs, labels)
                 total_loss += loss.item()
 
