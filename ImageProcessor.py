@@ -7,5 +7,5 @@ class ImageProcessor:
 
     def postprocess(self, prediction_tensor_float):
         predicted_classes = torch.argmax(prediction_tensor_float, dim=1)
-        predicted_classes = predicted_classes.unsqueeze(-1).to(torch.int64)  # usa int64, non byte
+        predicted_classes = predicted_classes.unsqueeze(-1).to(torch.int64)
         return predicted_classes

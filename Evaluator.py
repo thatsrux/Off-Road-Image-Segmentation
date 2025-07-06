@@ -1,6 +1,8 @@
 import numpy as np
 import torch
+
 from LabelMapper import LabelMapper
+
 
 class Evaluator:
     def __init__(self, model, test_loader, device):
