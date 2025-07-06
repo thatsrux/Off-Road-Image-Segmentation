@@ -21,7 +21,7 @@ class Trainer:
     def train_epoch(self):
         self.model.train()
         running_loss = 0.0
-        with tqdm(self.train_loader, desc="Training", leave=False) as pbar:
+        with tqdm(self.train_loader, desc="Training", leave=True) as pbar:
             for batch_idx, (images, labels) in enumerate(pbar):
                 images = images.to(self.device)
                 labels = labels.to(self.device)
@@ -43,7 +43,7 @@ class Trainer:
         all_predictions = []
         all_labels = []
         with torch.no_grad():
-            with tqdm(self.val_loader, desc="Validation", leave=False) as pbar:
+            with tqdm(self.val_loader, desc="Validation", leave=True) as pbar:
                 for batch_idx, (images, labels) in enumerate(pbar):
                     images = images.to(self.device, non_blocking=True)
                     labels = labels.to(self.device, non_blocking=True)
@@ -68,7 +68,7 @@ class Trainer:
             avg_iou = np.nanmean(iou_scores_all_classes)
         else:
             avg_ious_per_class = np.zeros(self.num_labels)
-        print(f"IoU medio per classe (validation): {[f'{iou:.4f}' for iou in avg_ious_per_class]}")
+        print(f"mean val IoU by class: {[f'{iou:.4f}' for iou in avg_ious_per_class]}")
 
         return avg_iou, avg_loss
 
