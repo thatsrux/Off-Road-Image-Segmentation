@@ -49,7 +49,7 @@ La classe `Trainer` gestisce l'intero ciclo di vita dell'addestramento:
 ## 🛠️ Come Iniziare
 
 1. **Requisiti**: Assicurati di avere installato PyTorch, torchvision, numpy, pillow e matplotlib.
-2. **Notebook Principale**: Esplora `main.ipynb` per vedere un esempio completo di addestramento e valutazione.
+2. **Notebook Principale**: Esplora `main.ipynb` per vedere un esempio completo di addestramento e valutazione. 
 3. **Predizione**: Puoi utilizzare la classe `Predictor` caricando il file `saved_model.pth` per testare il modello su nuove immagini.
 
 ---
